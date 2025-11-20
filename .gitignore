@@ -16,6 +16,8 @@ debug/
 *.ipynb
 .idea
 
+*venv*
+*egg-info*
 # vscode history
 .history
 

@@ -102,7 +102,8 @@ def _process_output(
         f_make_md_mode,
         middle_json,
         model_output=None,
-        is_pipeline=True
+        is_pipeline=True,
+        include_aside_text=False
 ):
     f_draw_line_sort_bbox = False
     from mineru.backend.pipeline.pipeline_middle_json_mkcontent import union_make as pipeline_union_make
@@ -126,7 +127,10 @@ def _process_output(
 
     if f_dump_md:
         make_func = pipeline_union_make if is_pipeline else vlm_union_make
-        md_content_str = make_func(pdf_info, f_make_md_mode, image_dir)
+        if is_pipeline:
+            md_content_str = make_func(pdf_info, f_make_md_mode, image_dir)
+        else:
+            md_content_str = make_func(pdf_info, f_make_md_mode, image_dir, include_aside_text=include_aside_text)
         md_writer.write_string(
             f"{pdf_file_name}.md",
             md_content_str,
@@ -224,6 +228,7 @@ async def _async_process_vlm(
         f_dump_content_list,
         f_make_md_mode,
         server_url=None,
+        include_aside_text=False,
         **kwargs,
 ):
     """异步处理VLM后端逻辑"""
@@ -247,7 +252,8 @@ async def _async_process_vlm(
             pdf_info, pdf_bytes, pdf_file_name, local_md_dir, local_image_dir,
             md_writer, f_draw_layout_bbox, f_draw_span_bbox, f_dump_orig_pdf,
             f_dump_md, f_dump_content_list, f_dump_middle_json, f_dump_model_output,
-            f_make_md_mode, middle_json, infer_result, is_pipeline=False
+            f_make_md_mode, middle_json, infer_result, is_pipeline=False,
+            include_aside_text=include_aside_text
         )
 
 
@@ -351,6 +357,7 @@ async def aio_do_parse(
         parse_method="auto",
         formula_enable=True,
         table_enable=True,
+        include_aside_text=False,
         server_url=None,
         f_draw_layout_bbox=True,
         f_draw_span_bbox=True,
@@ -389,7 +396,7 @@ async def aio_do_parse(
             output_dir, pdf_file_names, pdf_bytes_list, backend,
             f_draw_layout_bbox, f_draw_span_bbox, f_dump_md, f_dump_middle_json,
             f_dump_model_output, f_dump_orig_pdf, f_dump_content_list, f_make_md_mode,
-            server_url, **kwargs,
+            server_url, include_aside_text, **kwargs,
         )
 
 

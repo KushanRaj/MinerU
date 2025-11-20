@@ -51,6 +51,10 @@ def mk_blocks_to_markdown(para_blocks, make_mode, formula_enable, table_enable, 
         para_type = para_block['type']
         if para_type in [BlockType.TEXT, BlockType.INTERLINE_EQUATION, BlockType.PHONETIC, BlockType.REF_TEXT]:
             para_text = merge_para_with_text(para_block, formula_enable=formula_enable, img_buket_path=img_buket_path)
+        elif para_type == BlockType.ASIDE_TEXT:
+            # Format aside text as blockquote to distinguish from main text
+            aside_content = merge_para_with_text(para_block, formula_enable=formula_enable, img_buket_path=img_buket_path)
+            para_text = f"> **[Margin Note]**: {aside_content}"
         elif para_type == BlockType.LIST:
             for block in para_block['blocks']:
                 item_text = merge_para_with_text(block, formula_enable=formula_enable, img_buket_path=img_buket_path)
@@ -237,6 +241,7 @@ def make_blocks_to_content_list(para_block, img_buket_path, page_idx, page_size)
 def union_make(pdf_info_dict: list,
                make_mode: str,
                img_buket_path: str = '',
+               include_aside_text: bool = False
                ):
 
     formula_enable = get_formula_enable(os.getenv('MINERU_VLM_FORMULA_ENABLE', 'True').lower() == 'true')
@@ -250,6 +255,21 @@ def union_make(pdf_info_dict: list,
         page_size = page_info.get('page_size')
         if not paras_of_layout:
             continue
+
+        # If include_aside_text is True, move aside_text blocks from discarded to layout
+        if include_aside_text and paras_of_discarded:
+            aside_text_blocks = [
+                block for block in paras_of_discarded
+                if block.get('type') == BlockType.ASIDE_TEXT
+            ]
+            if aside_text_blocks:
+                paras_of_layout = paras_of_layout + aside_text_blocks
+                # Sort by bbox to maintain reading order (top to bottom, left to right)
+                paras_of_layout = sorted(
+                    paras_of_layout,
+                    key=lambda x: (x.get('bbox', [0, 0])[1], x.get('bbox', [0, 0])[0])
+                )
+
         if make_mode in [MakeMode.MM_MD, MakeMode.NLP_MD]:
             page_markdown = mk_blocks_to_markdown(paras_of_layout, make_mode, formula_enable, table_enable, img_buket_path)
             output_content.extend(page_markdown)
