@@ -10,6 +10,8 @@ from pathlib import Path
 import glob
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from datetime import datetime
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from starlette.background import BackgroundTask
@@ -22,8 +24,56 @@ from mineru.utils.cli_parser import arg_parse
 from mineru.utils.guess_suffix_or_lang import guess_suffix_by_path
 from mineru.version import __version__
 
-app = FastAPI()
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# 并发控制器
+_request_semaphore: Optional[asyncio.Semaphore] = None
+
+
+# 并发控制依赖函数
+async def limit_concurrency():
+    if _request_semaphore is not None:
+        if _request_semaphore.locked():
+            raise HTTPException(
+                status_code=503,
+                detail=f"Server is at maximum capacity: {os.getenv('MINERU_API_MAX_CONCURRENT_REQUESTS', 'unset')}. Please try again later.",
+            )
+        async with _request_semaphore:
+            yield
+    else:
+        yield
+
+
+def create_app():
+    # By default, the OpenAPI documentation endpoints (openapi_url, docs_url, redoc_url) are enabled.
+    # To disable the FastAPI docs and schema endpoints, set the environment variable MINERU_API_ENABLE_FASTAPI_DOCS=0.
+    enable_docs = str(os.getenv("MINERU_API_ENABLE_FASTAPI_DOCS", "1")).lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    app = FastAPI(
+        openapi_url="/openapi.json" if enable_docs else None,
+        docs_url="/docs" if enable_docs else None,
+        redoc_url="/redoc" if enable_docs else None,
+    )
+
+    # 初始化并发控制器：从环境变量MINERU_API_MAX_CONCURRENT_REQUESTS读取
+    global _request_semaphore
+    try:
+        max_concurrent_requests = int(
+            os.getenv("MINERU_API_MAX_CONCURRENT_REQUESTS", "0")
+        )
+    except ValueError:
+        max_concurrent_requests = 0
+
+    if max_concurrent_requests > 0:
+        _request_semaphore = asyncio.Semaphore(max_concurrent_requests)
+        logger.info(f"Request concurrency limited to {max_concurrent_requests}")
+
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    return app
+
+
+app = create_app()
 
 # In-memory job storage
 jobs_db: Dict[str, Dict[str, Any]] = {}
@@ -68,27 +118,65 @@ def get_infer_result(
     return None
 
 
-@app.post(
-    path="/file_parse",
-)
+@app.post(path="/file_parse", dependencies=[Depends(limit_concurrency)])
 async def parse_pdf(
-    files: List[UploadFile] = File(...),
-    output_dir: str = Form("./output"),
-    lang_list: List[str] = Form(["ch"]),
-    backend: str = Form("pipeline"),
-    parse_method: str = Form("auto"),
-    formula_enable: bool = Form(True),
-    table_enable: bool = Form(True),
+    files: List[UploadFile] = File(
+        ..., description="Upload pdf or image files for parsing"
+    ),
+    output_dir: str = Form("./output", description="Output local directory"),
+    lang_list: List[str] = Form(
+        ["ch"],
+        description="""(Adapted only for pipeline backend)Input the languages in the pdf to improve OCR accuracy.
+Options: ch, ch_server, ch_lite, en, korean, japan, chinese_cht, ta, te, ka, th, el, latin, arabic, east_slavic, cyrillic, devanagari.
+""",
+    ),
+    backend: str = Form(
+        "pipeline",
+        description="""The backend for parsing:
+- pipeline: More general
+- vlm-transformers: More general, but slower
+- vlm-mlx-engine: Faster than transformers (need apple silicon and macOS 13.5+)
+- vlm-vllm-async-engine: Faster (vllm-engine, need vllm installed)
+- vlm-lmdeploy-engine: Faster (lmdeploy-engine, need lmdeploy installed)
+- vlm-http-client: Faster (client suitable for openai-compatible servers)""",
+    ),
+    parse_method: str = Form(
+        "auto",
+        description="""(Adapted only for pipeline backend)The method for parsing PDF:
+- auto: Automatically determine the method based on the file type
+- txt: Use text extraction method
+- ocr: Use OCR method for image-based PDFs
+""",
+    ),
+    formula_enable: bool = Form(True, description="Enable formula parsing."),
+    table_enable: bool = Form(True, description="Enable table parsing."),
     include_aside_text: bool = Form(False),
-    server_url: Optional[str] = Form(None),
-    return_md: bool = Form(True),
-    return_middle_json: bool = Form(False),
-    return_model_output: bool = Form(False),
-    return_content_list: bool = Form(False),
-    return_images: bool = Form(False),
-    response_format_zip: bool = Form(False),
-    start_page_id: int = Form(0),
-    end_page_id: int = Form(99999),
+    server_url: Optional[str] = Form(
+        None,
+        description="(Adapted only for vlm-http-client backend)openai compatible server url, e.g., http://127.0.0.1:30000",
+    ),
+    return_md: bool = Form(True, description="Return markdown content in response"),
+    return_middle_json: bool = Form(
+        False, description="Return middle JSON in response"
+    ),
+    return_model_output: bool = Form(
+        False, description="Return model output JSON in response"
+    ),
+    return_content_list: bool = Form(
+        False, description="Return content list JSON in response"
+    ),
+    return_images: bool = Form(
+        False, description="Return extracted images in response"
+    ),
+    response_format_zip: bool = Form(
+        False, description="Return results as a ZIP file instead of JSON"
+    ),
+    start_page_id: int = Form(
+        0, description="The starting page for PDF parsing, beginning from 0"
+    ),
+    end_page_id: int = Form(
+        99999, description="The ending page for PDF parsing, beginning from 0"
+    ),
 ):
 
     # 获取命令行配置参数
@@ -200,12 +288,7 @@ async def parse_pdf(
                             )
 
                     if return_model_output:
-                        if backend.startswith("pipeline"):
-                            path = os.path.join(parse_dir, f"{pdf_name}_model.json")
-                        else:
-                            path = os.path.join(
-                                parse_dir, f"{pdf_name}_model_output.txt"
-                            )
+                        path = os.path.join(parse_dir, f"{pdf_name}_model.json")
                         if os.path.exists(path):
                             zf.write(
                                 path,
@@ -268,14 +351,9 @@ async def parse_pdf(
                             "_middle.json", pdf_name, parse_dir
                         )
                     if return_model_output:
-                        if backend.startswith("pipeline"):
-                            data["model_output"] = get_infer_result(
-                                "_model.json", pdf_name, parse_dir
-                            )
-                        else:
-                            data["model_output"] = get_infer_result(
-                                "_model_output.txt", pdf_name, parse_dir
-                            )
+                        data["model_output"] = get_infer_result(
+                            "_model.json", pdf_name, parse_dir
+                        )
                     if return_content_list:
                         data["content_list"] = get_infer_result(
                             "_content_list.json", pdf_name, parse_dir
@@ -401,20 +479,30 @@ async def process_job_async(
                 if return_md:
                     data["md_content"] = get_infer_result(".md", pdf_name, parse_dir)
                 if return_middle_json:
-                    data["middle_json"] = get_infer_result("_middle.json", pdf_name, parse_dir)
+                    data["middle_json"] = get_infer_result(
+                        "_middle.json", pdf_name, parse_dir
+                    )
                 if return_model_output:
                     if backend.startswith("pipeline"):
-                        data["model_output"] = get_infer_result("_model.json", pdf_name, parse_dir)
+                        data["model_output"] = get_infer_result(
+                            "_model.json", pdf_name, parse_dir
+                        )
                     else:
-                        data["model_output"] = get_infer_result("_model_output.txt", pdf_name, parse_dir)
+                        data["model_output"] = get_infer_result(
+                            "_model_output.txt", pdf_name, parse_dir
+                        )
                 if return_content_list:
-                    data["content_list"] = get_infer_result("_content_list.json", pdf_name, parse_dir)
+                    data["content_list"] = get_infer_result(
+                        "_content_list.json", pdf_name, parse_dir
+                    )
                 if return_images:
                     images_dir = os.path.join(parse_dir, "images")
                     safe_pattern = os.path.join(glob.escape(images_dir), "*.jpg")
                     image_paths = glob.glob(safe_pattern)
                     data["images"] = {
-                        os.path.basename(image_path): f"data:image/jpeg;base64,{encode_image(image_path)}"
+                        os.path.basename(
+                            image_path
+                        ): f"data:image/jpeg;base64,{encode_image(image_path)}"
                         for image_path in image_paths
                     }
 
@@ -563,11 +651,16 @@ def main(ctx, host, port, reload, **kwargs):
     # 将配置参数存储到应用状态中
     app.state.config = kwargs
 
+    # 将 CLI 的并发参数同步到环境变量，确保 uvicorn 重载子进程可见
+    try:
+        mcr = int(kwargs.get("mineru_api_max_concurrent_requests", 0) or 0)
+    except ValueError:
+        mcr = 0
+    os.environ["MINERU_API_MAX_CONCURRENT_REQUESTS"] = str(mcr)
+
     """启动MinerU FastAPI服务器的命令行入口"""
     print(f"Start MinerU FastAPI Service: http://{host}:{port}")
-    print("The API documentation can be accessed at the following address:")
-    print(f"- Swagger UI: http://{host}:{port}/docs")
-    print(f"- ReDoc: http://{host}:{port}/redoc")
+    print(f"API documentation: http://{host}:{port}/docs")
 
     uvicorn.run("mineru.cli.fast_api:app", host=host, port=port, reload=reload)
 

@@ -1,7 +1,7 @@
 <div align="center" xmlns="http://www.w3.org/1999/html">
 <!-- logo -->
 <p align="center">
-  <img src="docs/images/MinerU-logo.png" width="300px" style="vertical-align:middle;">
+  <img src="https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/docs/images/MinerU-logo.png" width="300px" style="vertical-align:middle;">
 </p>
 
 <!-- icon -->
@@ -44,6 +44,36 @@
 </div>
 
 # Changelog
+
+- 2025/12/02 2.6.6 Release
+  - `mineru-api` tool optimizations
+    - Added descriptive text to `mineru-api` interface parameters to improve API documentation readability.
+    - You can use the environment variable `MINERU_API_ENABLE_FASTAPI_DOCS` to control whether the auto-generated interface documentation page is enabled (enabled by default).
+    - Added concurrency configuration options for the `vlm-vllm-async-engine`, `vlm-lmdeploy-engine`, and `vlm-http-client` backends. Users can use the environment variable `MINERU_API_MAX_CONCURRENT_REQUESTS` to set the maximum number of concurrent API requests (unlimited by default).
+
+- 2025/11/26 2.6.5 Release
+  - Added support for a new backend vlm-lmdeploy-engine. Its usage is similar to vlm-vllm-(async)engine, but it uses lmdeploy as the inference engine and additionally supports native inference acceleration on Windows platforms compared to vllm.
+
+- 2025/11/04 2.6.4 Release
+  - Added timeout configuration for PDF image rendering, default is 300 seconds, can be configured via environment variable `MINERU_PDF_RENDER_TIMEOUT` to prevent long blocking of the rendering process caused by some abnormal PDF files.
+  - Added CPU thread count configuration options for ONNX models, default is the system CPU core count, can be configured via environment variables `MINERU_INTRA_OP_NUM_THREADS` and `MINERU_INTER_OP_NUM_THREADS` to reduce CPU resource contention conflicts in high concurrency scenarios.
+
+- 2025/10/31 2.6.3 Release
+  - Added support for a new backend `vlm-mlx-engine`, enabling MLX-accelerated inference for the MinerU2.5 model on Apple Silicon devices. Compared to the `vlm-transformers` backend, `vlm-mlx-engine` delivers a 100%–200% speed improvement.
+  - Bug fixes: #3849, #3859
+
+- 2025/10/24 2.6.2 Release
+  - `pipeline` backend optimizations
+    - Added experimental support for Chinese formulas, which can be enabled by setting the environment variable `export MINERU_FORMULA_CH_SUPPORT=1`. This feature may cause a slight decrease in MFR speed and failures in recognizing some long formulas. It is recommended to enable it only when parsing Chinese formulas is needed. To disable this feature, set the environment variable to `0`.
+    - `OCR` speed significantly improved by 200%~300%, thanks to the optimization solution provided by [@cjsdurj](https://github.com/cjsdurj)
+    - `OCR` models optimized for improved accuracy and coverage of Latin script recognition, and updated Cyrillic, Arabic, Devanagari, Telugu (te), and Tamil (ta) language systems to `ppocr-v5` version, with accuracy improved by over 40% compared to previous models 
+  - `vlm` backend optimizations
+    - `table_caption` and `table_footnote` matching logic optimized to improve the accuracy of table caption and footnote matching and reading order rationality in scenarios with multiple consecutive tables on a page
+    - Optimized CPU resource usage during high concurrency when using `vllm` backend, reducing server pressure
+    - Adapted to `vllm` version 0.11.0
+  - General optimizations
+    - Cross-page table merging effect optimized, added support for cross-page continuation table merging, improving table merging effectiveness in multi-column merge scenarios
+    - Added environment variable configuration option `MINERU_TABLE_MERGE_ENABLE` for table merging feature. Table merging is enabled by default and can be disabled by setting this variable to `0`
 
 - 2025/09/26 2.5.4 released
   - 🎉🎉 The MinerU2.5 [Technical Report](https://arxiv.org/abs/2509.22186) is now available! We welcome you to read it for a comprehensive overview of its model architecture, training strategy, data engineering and evaluation results.
@@ -571,7 +601,7 @@ https://github.com/user-attachments/assets/4bea02c9-6d54-4cd6-97ed-dff14340982c
 - Automatically recognize and convert formulas in the document to LaTeX format.
 - Automatically recognize and convert tables in the document to HTML format.
 - Automatically detect scanned PDFs and garbled PDFs and enable OCR functionality.
-- OCR supports detection and recognition of 84 languages.
+- OCR supports detection and recognition of 109 languages.
 - Supports multiple output formats, such as multimodal and NLP Markdown, JSON sorted by reading order, and rich intermediate formats.
 - Supports various visualization results, including layout visualization and span visualization, for efficient confirmation of output quality.
 - Supports running in a pure CPU environment, and also supports GPU(CUDA)/NPU(CANN)/MPS acceleration
@@ -608,41 +638,75 @@ A WebUI developed based on Gradio, with a simple interface and only core parsing
 > In non-mainline environments, due to the diversity of hardware and software configurations, as well as third-party dependency compatibility issues, we cannot guarantee 100% project availability. Therefore, for users who wish to use this project in non-recommended environments, we suggest carefully reading the documentation and FAQ first. Most issues already have corresponding solutions in the FAQ. We also encourage community feedback to help us gradually expand support.
 
 <table>
-    <tr>
-        <td>Parsing Backend</td>
-        <td>pipeline</td>
-        <td>vlm-transformers</td>
-        <td>vlm-vllm</td>
-    </tr>
-    <tr>
-        <td>Operating System</td>
-        <td>Linux / Windows / macOS</td>
-        <td>Linux / Windows</td>
-        <td>Linux / Windows (via WSL2)</td>
-    </tr>
-    <tr>
-        <td>CPU Inference Support</td>
-        <td>✅</td>
-        <td colspan="2">❌</td>
-    </tr>
-    <tr>
-        <td>GPU Requirements</td>
-        <td>Turing architecture and later, 6GB+ VRAM or Apple Silicon</td>
-        <td colspan="2">Turing architecture and later, 8GB+ VRAM</td>
-    </tr>
-    <tr>
-        <td>Memory Requirements</td>
-        <td colspan="3">Minimum 16GB+, recommended 32GB+</td>
-    </tr>
-    <tr>
-        <td>Disk Space Requirements</td>
-        <td colspan="3">20GB+, SSD recommended</td>
-    </tr>
-    <tr>
-        <td>Python Version</td>
-        <td colspan="3">3.10-3.13</td>
-    </tr>
+    <thead>
+        <tr>
+            <th rowspan="2">Parsing Backend</th>
+            <th rowspan="2">pipeline <br> (Accuracy<sup>1</sup> 82+)</th>
+            <th colspan="5">vlm (Accuracy<sup>1</sup> 90+)</th>
+        </tr>
+        <tr>
+            <th>transformers</th>
+            <th>mlx-engine</th>
+            <th>vllm-engine / <br>vllm-async-engine</th>
+            <th>lmdeploy-engine</th>
+            <th>http-client</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <th>Backend Features</th>
+            <td>Fast, no hallucinations</td>
+            <td>Good compatibility, <br>but slower</td>
+            <td>Faster than transformers</td>
+            <td>Fast, compatible with the vLLM ecosystem</td>
+            <td>Fast, compatible with the LMDeploy ecosystem</td>
+            <td>Suitable for OpenAI-compatible servers<sup>6</sup></td>
+        </tr>
+        <tr>
+            <th>Operating System</th>
+            <td colspan="2" style="text-align:center;">Linux<sup>2</sup> / Windows / macOS</td>
+            <td style="text-align:center;">macOS<sup>3</sup></td>
+            <td style="text-align:center;">Linux<sup>2</sup> / Windows<sup>4</sup> </td>
+            <td style="text-align:center;">Linux<sup>2</sup> / Windows<sup>5</sup> </td>
+            <td>Any</td>
+        </tr>
+        <tr>
+            <th>CPU inference support</th>
+            <td colspan="2" style="text-align:center;">✅</td>
+            <td colspan="3" style="text-align:center;">❌</td>
+            <td>Not required</td>
+        </tr>
+        <tr>
+            <th>GPU Requirements</th><td colspan="2" style="text-align:center;">Volta or later architectures, 6 GB VRAM or more, or Apple Silicon</td>
+            <td>Apple Silicon</td>
+            <td colspan="2" style="text-align:center;">Volta or later architectures, 8 GB VRAM or more</td>
+            <td>Not required</td>
+        </tr>
+        <tr>
+            <th>Memory Requirements</th>
+            <td colspan="5" style="text-align:center;">Minimum 16 GB, 32 GB recommended</td>
+            <td>8 GB</td>
+        </tr>
+        <tr>
+            <th>Disk Space Requirements</th>
+            <td colspan="5" style="text-align:center;">20 GB or more, SSD recommended</td>
+            <td>2 GB</td>
+        </tr>
+        <tr>
+            <th>Python Version</th>
+            <td colspan="6" style="text-align:center;">3.10-3.13<sup>7</sup></td>
+        </tr>
+    </tbody>
 </table>
+ 
+<sup>1</sup> Accuracy metric is the End-to-End Evaluation Overall score of OmniDocBench (v1.5), tested on the latest `MinerU` version.   
+<sup>2</sup> Linux supports only distributions released in 2019 or later.  
+<sup>3</sup> MLX requires macOS 13.5 or later, recommended for use with version 14.0 or higher.  
+<sup>4</sup> Windows vLLM support via WSL2(Windows Subsystem for Linux).  
+<sup>5</sup> Windows LMDeploy can only use the `turbomind` backend, which is slightly slower than the `pytorch` backend. If performance is critical, it is recommended to run it via WSL2.  
+<sup>6</sup> Servers compatible with the OpenAI API, such as local or remote model services deployed via inference frameworks like `vLLM`, `SGLang`, or `LMDeploy`.  
+<sup>7</sup> Windows + LMDeploy only supports Python versions 3.10–3.12, as the critical dependency `ray` does not yet support Python 3.13 on Windows.
+
 
 ### Install MinerU
 
@@ -661,8 +725,8 @@ uv pip install -e .[core]
 ```
 
 > [!TIP]
-> `mineru[core]` includes all core features except `vLLM` acceleration, compatible with Windows / Linux / macOS systems, suitable for most users.
-> If you need to use `vLLM` acceleration for VLM model inference or install a lightweight client on edge devices, please refer to the documentation [Extension Modules Installation Guide](https://opendatalab.github.io/MinerU/quick_start/extension_modules/).
+> `mineru[core]` includes all core features except `vLLM`/`LMDeploy` acceleration, compatible with Windows / Linux / macOS systems, suitable for most users.
+> If you need to use `vLLM`/`LMDeploy` acceleration for VLM model inference or install a lightweight client on edge devices, please refer to the documentation [Extension Modules Installation Guide](https://opendatalab.github.io/MinerU/quick_start/extension_modules/).
 
 ---
  
@@ -740,6 +804,8 @@ Currently, some models in this project are trained based on YOLO. However, since
 - [pdfminer.six](https://github.com/pdfminer/pdfminer.six)
 - [pypdf](https://github.com/py-pdf/pypdf)
 - [magika](https://github.com/google/magika)
+- [vLLM](https://github.com/vllm-project/vllm)
+- [LMDeploy](https://github.com/InternLM/lmdeploy)
 
 # Citation
 
