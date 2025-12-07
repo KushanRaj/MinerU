@@ -271,6 +271,8 @@ def union_make(pdf_info_dict: list,
                 )
 
         if make_mode in [MakeMode.MM_MD, MakeMode.NLP_MD]:
+            # Add HTML page marker
+            output_content.append(f'<!-- page {page_idx + 1} -->')
             page_markdown = mk_blocks_to_markdown(paras_of_layout, make_mode, formula_enable, table_enable, img_buket_path)
             output_content.extend(page_markdown)
         elif make_mode == MakeMode.CONTENT_LIST:
